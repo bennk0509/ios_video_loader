@@ -6,130 +6,70 @@
 //
 
 import UIKit
-import CoreMedia
-import VideoToolbox
-import AVFoundation
 
 class ViewController: UIViewController {
+    private let playerView: VideoPlayerView
+    private let playButton = UIButton(type: .system)
+    private let viewModel: VideoPlayerViewModel
 
-    private let loader: VideoLoader = AVVideoLoaderImpl()
-    private var session: VTDecompressionSession?
-    private let videoDisplayLayer = AVSampleBufferDisplayLayer()
-    private let decoder: VideoDecode = VTVideoDecodeImpl()
-    
+    init(playerView: VideoPlayerView, viewModel: VideoPlayerViewModel) {
+        self.playerView = playerView
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        setupVideoDisplayLayer()
-        Task {
-            await runPipeline()
+        view.backgroundColor = .black
+        setupViews()
+        viewModel.onStateChange = {[weak self] in
+            guard let self = self else {return}
+            self.updateUI(for: $0)
         }
-    }
-    private func setupVideoDisplayLayer() {
-        videoDisplayLayer.frame = self.view.bounds
-        videoDisplayLayer.videoGravity = .resizeAspect
-        self.view.layer.addSublayer(videoDisplayLayer)
+        viewModel.start()
     }
 
-    private func runPipeline() async {
-        guard let url = Bundle.main.url(forResource: "video", withExtension: "mov") else {
-            print("[ERROR] video.mov not found in bundle")
-            return
-        }
+    
+    private func setupViews(){
+        playerView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(playerView)
+        
+        playButton.translatesAutoresizingMaskIntoConstraints = false
+        playButton.setTitle("Play", for: .normal)
+        playButton.setTitleColor(.black, for: .normal)
+        playButton.backgroundColor = .white
+        playButton.layer.cornerRadius = 9
+        playButton.addTarget(self, action: #selector(didTapPlay), for: .touchUpInside)
+        view.addSubview(playButton)
+        
+        NSLayoutConstraint.activate([
+            playerView.topAnchor.constraint(equalTo: view.topAnchor),
+            playerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            playerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            playerView.bottomAnchor.constraint(equalTo: playButton.topAnchor),
 
-        do {
-            let (asset, track) = try await loader.load(from: url)
-            let reader = try AVVideoReaderImpl(asset: asset, track: track)
-            
-            var lastPTS: CMTime = .zero
-
-            for await sample in reader.makeVideoSampleStream() {
-                let sampleBuffer = sample.videoSampleBuffer
-                
-                let currentPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                if lastPTS != .zero {
-                    let frameDuration = CMTimeGetSeconds(currentPTS) - CMTimeGetSeconds(lastPTS)
-                    if frameDuration > 0 {
-                        try? await Task.sleep(nanoseconds: UInt64(frameDuration * 1_000_000_000))
-                    }
-                }
-                lastPTS = currentPTS
-                if let (pixelBuffer, pts) = try await decoder.decode(sample: sampleBuffer) {
-                    self.enqueuePixelBufferToLayer(pixelBuffer, pts: pts)
-                } else {
-                    print("[PIPELINE WARNING] Skip configuration FRAME.")
-                }
-            }
-
-        } catch {
-            print("[ERROR]:", error)
-        }
+            playButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            playButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24),
+            playButton.widthAnchor.constraint(equalToConstant: 120),
+            playButton.heightAnchor.constraint(equalToConstant: 48)
+        ])
     }
     
-    private func investigateVTDecompressionSession(sample: CMSampleBuffer){
-        guard let formatDescription = CMSampleBufferGetFormatDescription(sample) else {
-            print("[Decoder ERROR] Cannot see Format Description")
-            return
-        }
-        
-        if (session == nil){
-            guard let formatDescription = CMSampleBufferGetFormatDescription(sample) else {
-                print("[Decoder ERROR] Cant not see Format Description")
-                return
-            }
-            
-            let imageBufferAttributes: [CFString: Any] = [
-                    kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-                    kCVPixelBufferIOSurfacePropertiesKey: [:] as [CFString: Any]
-                ]
-            
-            let status = VTDecompressionSessionCreate(allocator: nil, formatDescription: formatDescription, decoderSpecification: nil, imageBufferAttributes: imageBufferAttributes as CFDictionary, decompressionSessionOut: &session)
-            
-            if status != noErr {
-                print("[Decoder ERROR] Failed to create session: \(status)")
-                return
-            }
-        }
-        guard let session = session else {return}
-        VTDecompressionSessionDecodeFrame(
-            session,
-            sampleBuffer: sample,
-            flags: [._EnableAsynchronousDecompression],
-            infoFlagsOut: nil
-        ) { [weak self] status, infoFlags, imageBuffer, pts, duration in
-            
-            if status == noErr, let pixelBuffer = imageBuffer {
-                self?.enqueuePixelBufferToLayer(pixelBuffer, pts: pts)
-            } else if status != noErr {
-                print("[Decoder ERROR] Decodec Error in PTS \(CMTimeGetSeconds(pts)): \(status)")
-            }
-        }
+    @objc private func didTapPlay(){
+        viewModel.togglePlay()
     }
-    private func enqueuePixelBufferToLayer(_ pixelBuffer: CVPixelBuffer, pts: CMTime) {
-        var formatDescription: CMVideoFormatDescription?
-        CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, formatDescriptionOut: &formatDescription)
-        
-        guard let formatDescription = formatDescription else { return }
-        var timingInfo = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
-        
-        var displaySampleBuffer: CMSampleBuffer?
-        CMSampleBufferCreateForImageBuffer(
-            allocator: kCFAllocatorDefault,
-            imageBuffer: pixelBuffer,
-            dataReady: true,
-            makeDataReadyCallback: nil,
-            refcon: nil,
-            formatDescription: formatDescription,
-            sampleTiming: &timingInfo,
-            sampleBufferOut: &displaySampleBuffer
-        )
-        
-        // Đẩy vào luồng hiển thị trên Main Thread
-        if let displayBuffer = displaySampleBuffer {
-            DispatchQueue.main.async {
-                if self.videoDisplayLayer.isReadyForMoreMediaData {
-                    self.videoDisplayLayer.enqueue(displayBuffer)
-                }
-            }
+    
+    private func updateUI(for state: State){
+        switch state {
+        case .playing:
+            playButton.setTitle("Stop", for: .normal)
+        default:
+            playButton.setTitle("Play", for: .normal)
         }
     }
 }
+

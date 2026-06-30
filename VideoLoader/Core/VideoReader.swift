@@ -32,7 +32,7 @@ nonisolated final class AVVideoReaderImpl: VideoReader, @unchecked Sendable{
     //GOAL We need to run while loop in background
     func makeVideoSampleStream() -> AsyncStream<VideoSample> {
         return AsyncStream{ continuation in
-            Task.detached(priority: .userInitiated){
+            let task = Task.detached(priority: .userInitiated){
                 guard self.reader.startReading() else{
                     print("[ERROR] can't start reading: \(String(describing: self.reader.error))")
                     continuation.finish()
@@ -46,6 +46,10 @@ nonisolated final class AVVideoReaderImpl: VideoReader, @unchecked Sendable{
                     continuation.yield(sample)
                 }
                 continuation.finish()
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+                self.reader.cancelReading()
             }
         }
     }

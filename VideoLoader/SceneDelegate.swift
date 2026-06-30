@@ -13,10 +13,38 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        // Use this method to optionally configure and attach the UIWindow `window` to the provided UIWindowScene `scene`.
-        // If using a storyboard, the `window` property will automatically be initialized and attached to the scene.
-        // This delegate does not imply the connecting scene or session are new (see `application:configurationForConnectingSceneSession` instead).
-        guard let _ = (scene as? UIWindowScene) else { return }
+        guard let windowScene = (scene as? UIWindowScene) else { return }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = makeRootViewController()
+        self.window = window
+        window.makeKeyAndVisible()
+    }
+
+    // MARK: - Composition Root
+    // This is the ONE place that knows how to wire all dependencies together.
+
+    private func makeRootViewController() -> UIViewController {
+        let playerView = VideoPlayerView()
+
+        let renderer = VideoRendererImpl(videoDisplayLayer: playerView.displayLayer)
+
+        guard let url = Bundle.main.url(forResource: "video", withExtension: "mov") else {
+
+            let vc = UIViewController()
+            vc.view.backgroundColor = .black
+            print("[SCENE ERROR] video.mov not found in bundle")
+            return vc
+        }
+
+        let viewModel = VideoPlayerViewModel(
+            url: url,
+            loader: AVVideoLoaderImpl(),
+            decoder: VTVideoDecodeImpl(),
+            renderer: renderer
+        )
+
+        return ViewController(playerView: playerView, viewModel: viewModel)
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
