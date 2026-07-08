@@ -7,21 +7,23 @@
 
 import AVFoundation
 
-protocol VideoLoader {
-    func load(from url: URL) async throws -> (AVAsset, AVAssetTrack)
+protocol Loader {
+    func load(from url: URL) async throws -> (AVAsset, AVAssetTrack, AVAssetTrack?)
 }
 
 enum VideoLoaderError: Error{
     case cantLoad
 }
 
-nonisolated final class AVVideoLoaderImpl: VideoLoader, @unchecked Sendable {
-    func load(from url: URL) async throws -> (AVAsset, AVAssetTrack) {
+nonisolated final class LoaderImpl: Loader, @unchecked Sendable {
+    func load(from url: URL) async throws -> (AVAsset, AVAssetTrack, AVAssetTrack?) {
         let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
             print("[ERROR]: loading failed")
             throw VideoLoaderError.cantLoad
         }
-        return (asset, track)
+        let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first
+                
+        return (asset, videoTrack, audioTrack)
     }
 }

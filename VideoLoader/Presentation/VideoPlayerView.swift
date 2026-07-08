@@ -29,4 +29,11 @@ final class VideoPlayerView: UIView {
         displayLayer.videoGravity = .resizeAspect
         backgroundColor = .black
     }
+
+    /// Áp orientation của track (đã mất khi decode thủ công) bằng cách xoay layer.
+    /// Chỉ lấy phần góc xoay từ preferredTransform để xoay quanh tâm.
+    func applyPreferredTransform(_ transform: CGAffineTransform) {
+        let angle = atan2(transform.b, transform.a)
+        displayLayer.setAffineTransform(CGAffineTransform(rotationAngle: angle))
+    }
 }

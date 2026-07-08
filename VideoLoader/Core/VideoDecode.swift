@@ -44,6 +44,9 @@ nonisolated final class VTVideoDecodeImpl: VideoDecode{
                 
                 if status == noErr {
                     if let pixelBuffer = imageBuffer {
+                        // Truyền lại thẻ màu (HLG/BT.2020...) từ format description gốc,
+                        // nếu không display layer sẽ hiểu nhầm HDR như SDR → ảnh bị sáng/bạc màu.
+                        self.transferColorAttachments(from: formatDescription, to: pixelBuffer)
                         continuation.resume(returning: (pixelBuffer, pts))
                     } else {
                         continuation.resume(returning: nil)
@@ -55,6 +58,21 @@ nonisolated final class VTVideoDecodeImpl: VideoDecode{
         }
     }
     
+    /// Copy các thẻ màu từ format description của track sang pixel buffer đã decode,
+    /// để CMSampleBuffer bọc lại giữ đúng thông tin màu cho display layer.
+    private func transferColorAttachments(from formatDescription: CMFormatDescription, to pixelBuffer: CVPixelBuffer) {
+        let mappings: [(CFString, CFString)] = [
+            (kCMFormatDescriptionExtension_ColorPrimaries, kCVImageBufferColorPrimariesKey),
+            (kCMFormatDescriptionExtension_TransferFunction, kCVImageBufferTransferFunctionKey),
+            (kCMFormatDescriptionExtension_YCbCrMatrix, kCVImageBufferYCbCrMatrixKey)
+        ]
+        for (extensionKey, bufferKey) in mappings {
+            if let value = CMFormatDescriptionGetExtension(formatDescription, extensionKey: extensionKey) {
+                CVBufferSetAttachment(pixelBuffer, bufferKey, value, .shouldPropagate)
+            }
+        }
+    }
+
     private func setUpSession(with formatDescription: CMVideoFormatDescription) throws{
         let imageBufferAttributes: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,

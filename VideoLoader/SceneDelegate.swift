@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import AVFoundation
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
@@ -21,27 +22,31 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
     }
 
-    // MARK: - Composition Root
-    // This is the ONE place that knows how to wire all dependencies together.
 
     private func makeRootViewController() -> UIViewController {
         let playerView = VideoPlayerView()
 
-        let renderer = VideoRendererImpl(videoDisplayLayer: playerView.displayLayer)
+        let mediaManager = MediaManager(
+            audioRender: AVSampleBufferAudioRenderer(),
+            videoRender: playerView.displayLayer.sampleBufferRenderer
+        )
 
-        guard let url = Bundle.main.url(forResource: "video", withExtension: "mov") else {
+        let resourceName = "IMG_3576"
+        let resourceExtension = "MOV"
+        guard let url = Bundle.main.url(forResource: resourceName, withExtension: resourceExtension) else {
 
             let vc = UIViewController()
             vc.view.backgroundColor = .black
-            print("[SCENE ERROR] video.mov not found in bundle")
+            print("[SCENE ERROR] \(resourceName).\(resourceExtension) not found in bundle")
             return vc
         }
 
+
         let viewModel = VideoPlayerViewModel(
             url: url,
-            loader: AVVideoLoaderImpl(),
+            loader: LoaderImpl(),
             decoder: VTVideoDecodeImpl(),
-            renderer: renderer
+            mediaManager: mediaManager
         )
 
         return ViewController(playerView: playerView, viewModel: viewModel)
